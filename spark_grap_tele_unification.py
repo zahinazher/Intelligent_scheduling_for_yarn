@@ -6,6 +6,8 @@ import os
 import re
 from operator import add
 
+#os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
+
 timestamps = [
     1490706976000000000,
     1490706978000000000,
@@ -20,6 +22,7 @@ class InfluxTensorflow():
         self.username = username
         self.password = password
         self.db = db
+        self.len_features = 5
 
         #'/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PCpuUsagePercentMaxPercents/,'+\
         #'/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PMemUsageMBsMaxMBs/,'+\
@@ -76,22 +79,12 @@ class InfluxTensorflow():
             offset += limit
             break
 
-    def training_step(i, update_test_data, update_train_data, XX, Y_, rdd_join):
+    def training_step(self, i, update_test_data, update_train_data, XX, Y_, training_data, train_step, sess):
 
         print "\r", i,
         ####### actual learning
         # reading batches of 100 images with 100 labels
         #batch_X, batch_Y = mnist.train.next_batch(100)
-        batch_X = [[ 1,  0,  0,  1,  0,  1,  0,  0,  0,  0]
- [ 0,  0,  0,  1,  0,  0,  0,  0,  0,  0]
- [ 0,  1,  0,  0,  0,  0,  1,  0,  0,  0]]
-
-        batch_Y = [[ 1,  0,  0,  1,  0,  1,  0,  1,  0,  0]
- [ 0,  0,  0,  1,  1,  0,  1,  0,  0,  0]
- [ 0,  1,  0,  0,  1,  0,  1,  0,  0,  0]]
-
-        # the backpropagation training step
-        sess.run(train_step, feed_dict={XX: batch_X, Y_: batch_Y})
 
         ####### evaluating model performance for printing purposes
         # evaluation used to later visualize how well you did at a particular time in the training
@@ -99,8 +92,16 @@ class InfluxTensorflow():
         train_c = []
         test_a = []
         test_c = []
+
+        data_initializer = tf.placeholder(dtype=tf.float32,
+                                    shape=[3, self.len_features])
+        input_data = tf.Variable(data_initializer, trainable=False, collections=[])
+
+        # the backpropagation training step
+        #sess.run(train_step, feed_dict={XX: training_data, Y_: training_data})
+
         if update_train_data:
-            a, c = sess.run([accuracy, cross_entropy], feed_dict={XX: batch_X, Y_: batch_Y})
+            a, c = sess.run(input_data.initializer, feed_dict={data_initializer: training_data, Y_: training_data})
             train_a.append(a)
             train_c.append(c)
 
@@ -112,71 +113,45 @@ class InfluxTensorflow():
         return (train_a, train_c, test_a, test_c)
 
     def train_model(self, rdd_join):
-        X = tf.placeholder(tf.float32, [1,10])
-        # load data, 60K trainset and 10K testset
-        #mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
+        nc = self.len_features # number of columns
+        nr = 3 # number of rows
+        X = tf.placeholder(tf.float32, [nr,nc])
 
-        #a1 = tf.placeholder(list, data.collect())
-        #print a1
         # 1. Define Variables and Placeholders
-        X = tf.placeholder(tf.float32, [None, 1, 10]) #the first dimension (None) will index the images
+        X = tf.placeholder(tf.float32, [nr, nc]) #the first dimension (None) will index the images
         # Y_ = ?
-        Y_ = tf.placeholder(tf.float32, [None, 1, 10]) # one hot encoding
-         # correct answers
-        # Weights initialised with small random values between -0.2 and +0.2
-        # 200, 100, 60, 30 and 10 neurons for each layer
-        W1 = tf.Variable(tf.truncated_normal([1, 10], stddev=0.1)) # 784 = 28 * 28
-        B1 = tf.Variable(tf.zeros([3]))
-        W2 = tf.Variable(tf.truncated_normal([1, 10], stddev=0.1)) # 784 = 28 * 28
-        B2 = tf.Variable(tf.zeros([3]))
-        """W3 = tf.Variable(tf.truncated_normal([100, 60], stddev=0.1)) # 784 = 28 * 28
-        B3 = tf.Variable(tf.zeros([60]))
-        W4 = tf.Variable(tf.truncated_normal([60, 30], stddev=0.1)) # 784 = 28 * 28
-        B4 = tf.Variable(tf.zeros([30]))
-        W5 = tf.Variable(tf.truncated_normal([30, 10], stddev=0.1)) # 784 = 28 * 28
-        B5 = tf.Variable(tf.zeros([10]))"""
+        Y_ = tf.placeholder(tf.float32, [nr, nc]) # one hot encoding
+        # Weights initialised with small random values between -0.2 and +0.2 ; 200, 100, 60, 30 and 10 neurons for each layer
+        W1 = tf.Variable(tf.truncated_normal([nr, nc], stddev=0.1)) # 784 = 28 * 28
+        B1 = tf.Variable(tf.zeros([nc]))
+        W2 = tf.Variable(tf.truncated_normal([nr, nc], stddev=0.1)) # 784 = 28 * 28
+        B2 = tf.Variable(tf.zeros([nc]))
         # 2. Define the model
-        # XX = ?
-        XX = tf.reshape(X, [-1, 1]) # flattening images
+        XX = tf.reshape(X, [nc, nr]) # flattening images
 
         # Y = Wx + b
         ######## SIGMOID activation func #######
         # Y1 = tf.nn.sigmoid(tf.matmul(XX, W1) + B1)
-        # Y2 = tf.nn.sigmoid(tf.matmul(Y1, W2) + B2)
-        # Y3 = tf.nn.sigmoid(tf.matmul(Y2, W3) + B3)
-        # Y4 = tf.nn.sigmoid(tf.matmul(Y3, W4) + B4)
         ######## ReLU activation func #######
-
         Y1 = tf.nn.relu(tf.matmul(XX, W1) + B1)
-        #Y2 = tf.nn.relu(tf.matmul(Y1, W2) + B2)
-        #Y3 = tf.nn.relu(tf.matmul(Y2, W3) + B3)
-        #Y4 = tf.nn.relu(tf.matmul(Y3, W4) + B4)
 
-        # Ylogits = ?
-        Ylogits = tf.matmul(Y1, W2) + B2 # (Y4, W5) + B5
+        #Ylogits = tf.matmul(Y1, W2) + B2 # (Y4, W5) + B5
 
-        # Y = tf.nn.?(Ylogits)
-        Y = tf.nn.softmax(Ylogits)
+        Y = tf.nn.softmax(Y1) # Ylogits
 
-        # 3. Define the loss function
-        # cross_entropy = tf.nn.?(Ylogits, Y_) # calculate cross-entropy with logits
-        cross_entropy = tf.nn.softmax_cross_entropy_with_logits(Ylogits, Y_)
-        cross_entropy = tf.reduce_mean(cross_entropy)
-
-        # cross_entropy = tf.nn.softmax(Ylogits, Y_) # calculate cross-entropy with logits
-        # cross_entropy = tf.reduce_mean(?)*?
-        # correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
-        # cross_entropy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        #cross_entropy = tf.nn.softmax_cross_entropy_with_logits(Y1, Y_) # Ylogits with Y1
+        #cross_entropy = tf.reduce_mean(cross_entropy)
 
         # 4. Define the accuracy
-        is_correct = tf.equal(tf.argmax(Y,1), tf.argmax(Y_,1))
-        accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
+        #is_correct = tf.equal(tf.argmax(Y,1), tf.argmax(Y_,1))
+        #accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
         # 5. Define an optimizer
         # optimizer = tf.train.GradientDescentOptimizer(0.5)
         # train_step = optimizer.minimize(cross_entropy)
-        optimizer = tf.train.AdamOptimizer(0.005)  ## do not use gradient descent
-        train_step = optimizer.minimize(cross_entropy)
+        #optimizer = tf.train.AdamOptimizer(0.005)  ## do not use gradient descent
+        #train_step = optimizer.minimize(cross_entropy)
+        train_step = 1
 
         # initialize and train
         #init = tf.initialize_all_variables()
@@ -191,34 +166,32 @@ class InfluxTensorflow():
         test_a = []
         test_c = []
 
-        sess.run(feed_dict=rdd_join)
-
         training_iter = 1000
         epoch_size = 100
+        training_data = rdd_join.collect()
 
-        for i in range(training_iter):
+        """for i in range(training_iter):
             test = False
             if i % epoch_size == 0:
                 test = True
-            a, c, ta, tc = training_step(i, test, test, X, Y_, rdd_join)
+            a, c, ta, tc = self.training_step(i, test, test, X, Y_, training_data, train_step, sess)
             train_a += a
             train_c += c
             test_a += ta
             test_c += tc
 
-        print X
-        return []
+        print X"""
 
-    def train_model_test(self, rdd_join):
         training_data = rdd_join.collect()
+        
         data_initializer = tf.placeholder(dtype=tf.float32,
-                                    shape=[1, 3])
+                                    shape=[nr, self.len_features])
         input_data = tf.Variable(data_initializer, trainable=False, collections=[])
-        sess = tf.Session()
-        sess.run(input_data.initializer, feed_dict={data_initializer: training_data})
+        res = sess.run(input_data.initializer, feed_dict={data_initializer: training_data})
+        print res
 
     def load_data_into_tensorflow(self, data):
-        return self.train_model_test(data)
+        return self.train_model(data)
 
     def join_rdd(self, rdd1_, rdd2_):
         rdd_ = rdd1_.join(rdd2_) #.collectAsMap() # .reduceByKey(lambda x,y : x+y)
@@ -279,8 +252,6 @@ class InfluxTensorflow():
 
 
 if __name__ == '__main__':
-    username = 'adminuser'
-    password = 'adminpw'
     f = open('/home/vagrant/config.txt', 'rb')
     info = (f.read()).split("\n")
     username = info[0]
