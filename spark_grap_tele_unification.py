@@ -5,6 +5,7 @@ import tensorflow as tf
 import os
 import re
 from operator import add
+import numpy as np
 
 #os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
@@ -24,19 +25,6 @@ class InfluxTensorflow():
         self.db = db
         self.len_features = 5
 
-        #'/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PCpuUsagePercentMaxPercents/,'+\
-        #'/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PMemUsageMBsMaxMBs/,'+\
-        #'/application_.*.driver.BlockManager.memory.memUsed_MB/,/application_.*.driver.BlockManager.memory.remainingMem_MB/,'+\
-        #'/application_.*.driver.BlockManager.disk.diskSpaceUsed_MB/,'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapCommittedM",'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapMaxM",'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapUsedM",'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapCommittedM",'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapMaxM",'+\
-        #'"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapUsedM",'+\
-        #'"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
-
-
         self.query_gg = 'select * from '+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedContainers",'+\
         '/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PCpuUsagePercentMaxPercents/,'+\
@@ -53,7 +41,7 @@ class InfluxTensorflow():
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
 
 
-        self.query_g = 'select * from '+\
+        self.query_g12 = 'select * from '+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedContainers",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AvailableVCores",'+\
          '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapMaxM",'+\
@@ -63,6 +51,9 @@ class InfluxTensorflow():
          '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapUsedM",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
+
+        self.query_g = 'select * from '+\
+         '"spark"'
 
         self.query_t = 'select * from cpu,mem '
 
@@ -105,10 +96,10 @@ class InfluxTensorflow():
             train_a.append(a)
             train_c.append(c)
 
-        """if update_test_data:
+        if update_test_data:
             a, c = sess.run([accuracy, cross_entropy], feed_dict={XX: mnist.test.images, Y_: mnist.test.labels})
             test_a.append(a)
-            test_c.append(c)"""
+            test_c.append(c)
 
         return (train_a, train_c, test_a, test_c)
 
@@ -144,6 +135,8 @@ class InfluxTensorflow():
 
         # 4. Define the accuracy
         #is_correct = tf.equal(tf.argmax(Y,1), tf.argmax(Y_,1))
+        # tf.argmax(Y,1) label our model thinks is most likely for each input
+        # tf.argmax(y_,1) is the correct label
         #accuracy = tf.reduce_mean(tf.cast(is_correct, tf.float32))
 
         # 5. Define an optimizer
@@ -183,15 +176,43 @@ class InfluxTensorflow():
         print X"""
 
         training_data = rdd_join.collect()
-        
+
         data_initializer = tf.placeholder(dtype=tf.float32,
                                     shape=[nr, self.len_features])
         input_data = tf.Variable(data_initializer, trainable=False, collections=[])
         res = sess.run(input_data.initializer, feed_dict={data_initializer: training_data})
         print res
 
+    def train_model_test(self, rdd_join):
+        val = rdd_join.collect()
+        training_data = np.array(rdd_join.collect())
+
+        x = tf.placeholder(tf.float32, shape=(3, 5))
+        y = tf.matmul(tf.reshape(x, [5, 3]), x)
+        with tf.Session() as sess:
+            print (sess.run(y, feed_dict={x: val}))
+
+        """# Specify that all features have real-value data
+        feature_columns = [tf.contrib.layers.real_valued_column("", dimension=5)]
+
+        # Build 3 layer DNN with 10, 20, 10 units respectively.
+        classifier = tf.contrib.learn.DNNClassifier(feature_columns=feature_columns,
+                                            hidden_units=[10, 20, 10],
+                                            n_classes=3)
+        # Fit model.
+        classifier.fit(x=training_data,
+               y=training_data,
+               steps=10)
+
+        # Evaluate accuracy.
+        accuracy_score = classifier.evaluate(x=test_set.data,
+                                     y=test_set.target)["accuracy"]
+        print('Accuracy: {0:f}'.format(accuracy_score))"""
+
+        return []
+
     def load_data_into_tensorflow(self, data):
-        return self.train_model(data)
+        return self.train_model_test(data)
 
     def join_rdd(self, rdd1_, rdd2_):
         rdd_ = rdd1_.join(rdd2_) #.collectAsMap() # .reduceByKey(lambda x,y : x+y)
@@ -201,8 +222,7 @@ class InfluxTensorflow():
             return rdd1_
 
     def join_graphite_metrics(self, results_g, sc):
-        count = 0
-        for res_g in results_g.raw['series'][0:4]:
+        for count, res_g in enumerate(results_g.raw['series'][0:4]):
             values_g = res_g['values']
             name_g = res_g['name']
 
@@ -214,7 +234,6 @@ class InfluxTensorflow():
             else:
                 rdd_join = self.join_rdd(rdd_join, rdd1_)
                 pass
-            count += 1
             if re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S):
                 hostname = re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S).group(1)
                 #print "hostname:",hostname
@@ -229,27 +248,35 @@ class InfluxTensorflow():
             rdd_join = self.join_rdd(rdd_join, rdd1_)
         return rdd_join
 
+    def get_results_from_graphite(self, time1, time2):
+        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_g, time1, time2)
+        return self.query_batch(query, db="graphite")
+
+    def get_results_from_telegraf(self, time1, time2):
+        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_t, time1, time2)
+        return self.query_batch(query, db="telegraf")
+
     def main(self):
 
-        time1 = 1490706976000000000
-        time2 = 1490706999000000000
-        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_g, time1, time2)
-        results_g = self.query_batch(query, db="graphite")
+        time11 = 1490706976000000000
+        time22 = 1490706999000000000
+        time1 = 1492514925000000000 # for spark
+        time2 = 1492514927000000000 # for spark
 
-        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_t, time1, time2)
-        results_t = self.query_batch(query, db="telegraf")
-        values_t =(results_t.raw['series'])[1]['values']
+        results_t = self.get_results_from_telegraf(time11, time22)
+        #values_t =(results_t.raw['series'])[1]['values']
+        results_g = self.get_results_from_graphite(time1, time2)
+        if True: # results_t
 
-        sc = SparkContext()
+            sc = SparkContext()
 
-        rdd_join = self.join_graphite_metrics(results_g, sc)
-        #rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
-        rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
-        print rdd_join.collect()
-        #print rdd_join.coalesce(1).glom().collect()   # .glom()
-
-        result = self.load_data_into_tensorflow(rdd_join)
-
+            rdd_join = self.join_graphite_metrics(results_t, sc)
+            rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
+            rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
+            print rdd_join.collect()
+            #print rdd_join.coalesce(1).glom().collect()   # .glom()
+            #print np.array(rdd_join.collect())
+            result = self.load_data_into_tensorflow(rdd_join)
 
 if __name__ == '__main__':
     f = open('/home/vagrant/config.txt', 'rb')
@@ -258,3 +285,4 @@ if __name__ == '__main__':
     password = info[1]
     indbtf = InfluxTensorflow('localhost', 8086, username, password, 'graphite')
     indbtf.main()
+
