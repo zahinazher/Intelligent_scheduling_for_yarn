@@ -6,6 +6,7 @@ import os
 import re
 from operator import add
 import numpy as np
+import argparse
 
 #os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
@@ -41,7 +42,7 @@ class InfluxTensorflow():
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
 
 
-        self.query_g12 = 'select * from '+\
+        self.query_g = 'select * from '+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedContainers",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AvailableVCores",'+\
          '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapMaxM",'+\
@@ -52,10 +53,10 @@ class InfluxTensorflow():
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
 
-        self.query_g = 'select * from '+\
+        self.query_rns = 'select * from '+\
          '"spark"'
 
-        self.query_t = 'select * from cpu,mem '
+        self.query_t = 'select * from cpu,mem'
 
     def query_batch(self, query, db, epoch='ns'):
         cli = InfluxDBClient(self.hostname, self.port, self.username, self.password)
@@ -256,6 +257,10 @@ class InfluxTensorflow():
         query = "{0} where time > {1} and time < {2} limit 3".format(self.query_t, time1, time2)
         return self.query_batch(query, db="telegraf")
 
+    def get_results_from_graphite_test(self, time1, time2):
+        query = "{0} where time > {1} and time < {2} limit 2".format(self.query_rns, time1, time2)
+        return self.query_batch(query, db="graphite")
+
     def main(self):
 
         time11 = 1490706976000000000
@@ -263,26 +268,43 @@ class InfluxTensorflow():
         time1 = 1492514925000000000 # for spark
         time2 = 1492514927000000000 # for spark
 
-        results_t = self.get_results_from_telegraf(time11, time22)
+        #results_t = self.get_results_from_telegraf(time11, time22)
         #values_t =(results_t.raw['series'])[1]['values']
-        results_g = self.get_results_from_graphite(time1, time2)
-        if True: # results_t
+        #results_g = self.get_results_from_graphite(time1, time2)
+        results_g = self.get_results_from_graphite_test(time1, time2)
+        print results_g
+        if False: # results_t
 
             sc = SparkContext()
 
             rdd_join = self.join_graphite_metrics(results_t, sc)
-            rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
+            #rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
             rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
             print rdd_join.collect()
             #print rdd_join.coalesce(1).glom().collect()   # .glom()
             #print np.array(rdd_join.collect())
-            result = self.load_data_into_tensorflow(rdd_join)
+            #result = self.load_data_into_tensorflow(rdd_join)
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Optional arguments for InfluxDB')
+    parser.add_argument('--host', type=str, required=False,
+                        default='localhost',
+                        help='hostname of InfluxDB http API')
+    parser.add_argument('--port', type=int, required=False, default=8086,
+                        help='port of InfluxDB http API')
+    parser.add_argument('--configfile', type=str, required=False, default='/home/vagrant/config.txt',
+                        help='path to config file containing username & password')
+
+    return parser.parse_args()
 
 if __name__ == '__main__':
-    f = open('/home/vagrant/config.txt', 'rb')
+    args = parse_args()
+
+    f = open(args.configfile, 'rb')
     info = (f.read()).split("\n")
     username = info[0]
     password = info[1]
-    indbtf = InfluxTensorflow('localhost', 8086, username, password, 'graphite')
+    indbtf = InfluxTensorflow(args.host, args.port, username, password, 'graphite')
     indbtf.main()
 
