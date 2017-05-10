@@ -53,8 +53,7 @@ class InfluxTensorflow():
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
          '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
 
-        self.query_rns = 'select * from '+\
-         '"spark"'
+        self.query_rns = 'select * from'
 
         self.query_t = 'select * from cpu,mem'
 
@@ -187,11 +186,11 @@ class InfluxTensorflow():
     def train_model_test(self, rdd_join):
         val = rdd_join.collect()
         training_data = np.array(rdd_join.collect())
-
+        print training_data
         x = tf.placeholder(tf.float32, shape=(3, 5))
         y = tf.matmul(tf.reshape(x, [5, 3]), x)
-        with tf.Session() as sess:
-            print (sess.run(y, feed_dict={x: val}))
+        #with tf.Session() as sess:
+        #    print (sess.run(y, feed_dict={x: val}))
 
         """# Specify that all features have real-value data
         feature_columns = [tf.contrib.layers.real_valued_column("", dimension=5)]
@@ -212,8 +211,34 @@ class InfluxTensorflow():
 
         return []
 
+    def train_model_lstm(self, data):
+        num_steps = 5
+        data = data.collect()
+        batch_size = len(data)
+        lstm_size = 5
+        # Placeholder for the inputs in a given iteration.
+        words = tf.placeholder(tf.int32, [batch_size, num_steps])
+
+        lstm = tf.contrib.rnn.BasicLSTMCell(lstm_size)
+        # Initial state of the LSTM memory.
+        initial_state = state = tf.zeros([batch_size, lstm.state_size])
+        probablilities = []
+        loss = 0.0
+
+        for i in range(num_steps):
+            # The value of state is updated after processing each batch of words.
+            output, state = lstm(data[:, i], state)
+
+            # The LSTM output can be used to make next word predictions
+            logits = tf.matmul(output, softmax_w) + softmax_b
+            probabilities.append(tf.nn.softmax(logits))
+            loss += loss_function(probabilities, target_words)
+
+        final_state = state
+
     def load_data_into_tensorflow(self, data):
-        return self.train_model_test(data)
+        #return self.train_model_test(data)
+        return self.train_model_lstm(data)
 
     def join_rdd(self, rdd1_, rdd2_):
         rdd_ = rdd1_.join(rdd2_) #.collectAsMap() # .reduceByKey(lambda x,y : x+y)
@@ -223,67 +248,97 @@ class InfluxTensorflow():
             return rdd1_
 
     def join_graphite_metrics(self, results_g, sc):
-        for count, res_g in enumerate(results_g.raw['series'][0:4]):
-            values_g = res_g['values']
-            name_g = res_g['name']
+        if results_g:
+            for count, res_g in enumerate(results_g.raw['series'][0:]):
+                values_g = res_g['values']
+                name_g = res_g['name']
+                columns_g = res_g['columns']
 
-            rdd1 = sc.parallelize(values_g)
-            rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
-            print rdd1_.collect()
+                rdd1 = sc.parallelize(values_g)
+                rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
+                print rdd1_.collect()
+                if count == 0:
+                    rdd_join = rdd1_
+                else:
+                    rdd_join = self.join_rdd(rdd_join, rdd1_)
+                    pass
+                if re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S):
+                    hostname = re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S).group(1)
+                    #print "hostname:",hostname
+            return rdd_join
+        else:
+            return []
+
+    def join_telegraf_metrics(self, results_t, sc):
+        for count, res_t in enumerate(results_t.raw['series'][0:]):
+            values_t = res_t['values']
+            name_t = res_t['name']
+            columns_t = res_t['columns']
+            rdd1 = sc.parallelize(values_t)
+            #rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
+            rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[1:])))
+            print ("rdd1____",rdd1_.collect())
             if count == 0:
                 rdd_join = rdd1_
             else:
                 rdd_join = self.join_rdd(rdd_join, rdd1_)
-                pass
-            if re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S):
-                hostname = re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S).group(1)
-                #print "hostname:",hostname
-        return rdd_join
-
-    def join_telegraf_metrics(self, results_t, rdd_join, sc):
-        for res_t in results_t.raw['series'][:2]:
-            values_t = res_t['values']
-            name_t = res_t['name']
-            rdd1 = sc.parallelize(values_t)
-            rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
-            rdd_join = self.join_rdd(rdd_join, rdd1_)
         return rdd_join
 
     def get_results_from_graphite(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_g, time1, time2)
+        query = "{0} where time > {1} and time < {2} limit 2".format(self.query_g, time1, time2)
         return self.query_batch(query, db="graphite")
 
     def get_results_from_telegraf(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} limit 3".format(self.query_t, time1, time2)
+        query = "{0} where time > {1} and time < {2} limit 2".format(self.query_t, time1, time2)
         return self.query_batch(query, db="telegraf")
 
-    def get_results_from_graphite_test(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} limit 2".format(self.query_rns, time1, time2)
+    def get_results_from_graphite_nm(self, time1, time2):
+        query = "{0} nodemanager where source =~ /container.*$/ and time = {1} limit 2".format(self.query_rns, time1)
+        #query = "{0} nodemanager where service =~ /jvm.*/ and source =~ /JvmMetrics/ limit 2".format(self.query_rns)
+        return self.query_batch(query, db="graphite")
+
+    def get_results_from_graphite_spark(self, time1, time2):
+        query = "{0} spark where source =~ /jvm/ and service =~ /driver/ and time = {1} limit 2".format(self.query_rns, time1)
         return self.query_batch(query, db="graphite")
 
     def main(self):
 
         time11 = 1490706976000000000
         time22 = 1490706999000000000
-        time1 = 1492514925000000000 # for spark
+        time1 = 1493287029000000000 # for spark
         time2 = 1492514927000000000 # for spark
 
-        #results_t = self.get_results_from_telegraf(time11, time22)
-        #values_t =(results_t.raw['series'])[1]['values']
+        t_nm = 1493038354000000000
+
+        results_t = self.get_results_from_telegraf(time11, time22); print ("result_telegraf", results_t)
+        values_t = (results_t.raw['series'])[0]['columns']; print values_t; #return
         #results_g = self.get_results_from_graphite(time1, time2)
-        results_g = self.get_results_from_graphite_test(time1, time2)
-        print results_g
-        if False: # results_t
+
+        results_g_nm = self.get_results_from_graphite_nm(time1, time2)
+        print "result_g_nm",results_g_nm
+        results_g_spark = self.get_results_from_graphite_spark(time1, time2)
+        print "resutls_g_spark",results_g_spark
+        if True: # results_t
 
             sc = SparkContext()
 
-            rdd_join = self.join_graphite_metrics(results_t, sc)
+            rdd_join_tele = self.join_telegraf_metrics(results_t, sc)
+            print ("tele",rdd_join_tele.collect())
+            rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc)
+            print ("nm",rdd_join_g_nm.collect())
+            rdd_join_g_spark = self.join_graphite_metrics(results_g_spark, sc)
+            #print ("spark",rdd_join_g_spark.collect())
+
+            rdd_join = self.join_rdd(rdd_join_g_nm, rdd_join_g_spark)
+            #rdd_join = self.join_rdd(rdd_join, rdd_join_tele)
+
+            #rdd_join = self.join_graphite_metrics(results_t, sc)
             #rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
             rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
-            print rdd_join.collect()
+            print ("joined results", rdd_join.collect())
             #print rdd_join.coalesce(1).glom().collect()   # .glom()
             #print np.array(rdd_join.collect())
-            #result = self.load_data_into_tensorflow(rdd_join)
+            result = self.load_data_into_tensorflow(rdd_join)
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -307,4 +362,3 @@ if __name__ == '__main__':
     password = info[1]
     indbtf = InfluxTensorflow(args.host, args.port, username, password, 'graphite')
     indbtf.main()
-
