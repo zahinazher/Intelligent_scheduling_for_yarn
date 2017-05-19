@@ -406,7 +406,7 @@
 <!-- container monitoring and metrics period -->
   <property>
     <name>yarn.nodemanager.container-metrics.period-ms</name>
-    <value>1000</value>
+    <value>2000</value>
     <description>Container metrics flush period in ms. Set to -1 for flush on completion.</description>
   </property>
 
