@@ -329,10 +329,10 @@ class InfluxTensorflow():
                 rdd1 = sc.parallelize(values_g)
                 print rdd1.collect()
 
-                if source == 'nm':                  #   | mem heap | mem cpu limit| mem heap | threads |  source
+                if source == 'nm':                 #   | mem heap | mem cpu limit| mem heap | threads |  source
                     rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[17:18] + x[31:34] + x[38:44] + x[60:66] + x[70:71] )))
                 elif source == 'spark':            #   appid     |  compile | diskspace  |  read write ops |  heap init | jobs n mem | 
-                    rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[5:6] + x[8:9] + x[17:18] + x[27:28] + x[29:30] + x[52:57] x[58:63])))
+                    rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[5:6] + x[8:9] + x[17:18] + x[27:28] + x[29:30] + x[52:57] + x[58:63])))
                     #rdd1_ = rdd1_.map(lambda x: (x[0], tuple(x[1:5] + [float(x[5].replace('application_',''))] + x[6:])))
                 else:
                     pass
@@ -361,11 +361,14 @@ class InfluxTensorflow():
         """
         for count, res_t in enumerate(results_t.raw['series'][0:]):
             values_t = res_t['values']
-            name_t = res_t['name']
+            name_t = res_t['name']; print ('name_t',name_t); print ('values_t', values_t)
             columns_t = res_t['columns']; print ("colmmns",columns_t)
             rdd1 = sc.parallelize(values_t)
-            #rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
-            rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[1:]))) # hardcoded time need to be replaced after
+            if count == 0: # for host cpu info
+                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[23:25])))
+            elif count == 1: # for host mem info
+                #rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
+                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[23:25]))) # hardcoded time need to be replaced after
             print ("rdd1____",rdd1_.collect())
             if count == 0:
                 rdd_join = rdd1_
@@ -411,13 +414,16 @@ class InfluxTensorflow():
 
             sc = SparkContext()
 
-            #rdd_join_tele = self.join_telegraf_metrics(results_t, sc)
-            #print ("tele",rdd_join_tele.collect())
-            rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm')
-            print ("nm",rdd_join_g_nm.collect()); return
+            rdd_join_tele = self.join_telegraf_metrics(results_t, sc)
+            print ("tele",rdd_join_tele.collect()); return
+            #rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm')
+            #print ("nm",rdd_join_g_nm.collect()); return
 
-            rdd_join_g_spark = self.join_graphite_metrics(results_g_spark, sc, 'spark')
-            print ("spark",rdd_join_g_spark.collect()); 
+            #rdd_join_g_spark = self.join_graphite_metrics(results_g_spark, sc, 'spark')
+            #print ("spark",rdd_join_g_spark.collect());
+
+            rdd_join_g_rm = self.join_graphite_metrics(results_g_rm, sc, 'rm')
+            print ("rm",rdd_join_g_rm.collect()); return
 
             rdd_join = self.join_rdd(rdd_join_g_nm, rdd_join_g_spark)
             #rdd_join = self.join_rdd(rdd_join, rdd_join_tele)
@@ -453,4 +459,3 @@ if __name__ == '__main__':
     password = info[1]
     indbtf = InfluxTensorflow(args.host, args.port, username, password, 'graphite')
     indbtf.main()
-
