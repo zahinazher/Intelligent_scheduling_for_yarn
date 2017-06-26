@@ -21,39 +21,16 @@ class InfluxTensorflow():
         self.db = db
         self.len_features = 5
 
-        """
-        these queries are only for testing and shall be removed after code testing
-        """
-        self.query_gg = 'select * from '+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedContainers",'+\
-        '/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PCpuUsagePercentMaxPercents/,'+\
-        '/nodemanager.container.ContainerResource_container_.*.ContainerResource=container_.*.Context=container.ContainerPid=.*.Hostname=vagrant.PMemUsageMBsMaxMBs/,'+\
-        '/application_.*.driver.BlockManager.memory.memUsed_MB/,/application_.*.driver.BlockManager.memory.remainingMem_MB/,'+\
-        '/application_.*.driver.BlockManager.disk.diskSpaceUsed_MB/,'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapCommittedM",'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapMaxM",'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapUsedM",'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapCommittedM",'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapMaxM",'+\
-        '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapUsedM",'+\
-        '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
-
-
-        self.query_g = 'select * from '+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedContainers",'+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AvailableVCores",'+\
-         '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapMaxM",'+\
-         '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemHeapUsedM",'+\
-         '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapCommittedM",'+\
-         '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapMaxM",'+\
-         '"nodemanager.jvm.JvmMetrics.Context=jvm.ProcessName=NodeManager.Hostname=vagrant.MemNonHeapUsedM",'+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.AllocatedGB",'+\
-         '"nodemanager.yarn.NodeManagerMetrics.Context=yarn.Hostname=vagrant.ContainerLaunchDurationAvgTime" '
-
         self.query_rns = 'select * from'
 
-        self.query_t = 'select * from cpu,mem'
+        self.query_t_cpu = 'select * from cpu'
+        self.query_t_mem = 'select * from mem'
+
+        self.rep_None = -1
+        self.col_len_nm = 12
+        self.col_len_rm = 5
+        self.col_len_spark = 8
+        self.col_len_host = 5
 
     def query_batch(self, query, db, epoch='ns'):
         """
@@ -62,7 +39,7 @@ class InfluxTensorflow():
         :param query:
         :param db:
         :param epoch:
-        :return 
+        :return
         """
         cli = InfluxDBClient(self.hostname, self.port, self.username, self.password)
 
@@ -83,11 +60,11 @@ class InfluxTensorflow():
         :param i: iteration count
         :param update_test_data: contains updated testing data
         :param update_train_data: contains updated training data
-        :param XX: data 
-        :param Y_: one hot encoding 
+        :param XX: data
+        :param Y_: one hot encoding
         :param training_data: data used for training
         :param train_step: step size during training
-        :param sess: session 
+        :param sess: session
         :return: training and testing lists
         """
 
@@ -124,7 +101,7 @@ class InfluxTensorflow():
 
     def train_model(self, rdd_join):
         """
-        train the machine learning Model 
+        train the machine learning Model
 
         :param: rdd_join: Resilient distributed datasets
         :return: result for ML model
@@ -137,11 +114,6 @@ class InfluxTensorflow():
 
         X = tf.placeholder(tf.float32, [batch_size, col_length])
 
-        one_hot = tf.convert_to_tensor(data)
-        
-        print ('one', one_hot)
-
-        """
         # 1. Define Variables and Placeholders
         X = tf.placeholder(tf.float32, [batch_size, col_length]) #the first dimension (None) will index the images
         # Y_ = ?
@@ -154,7 +126,7 @@ class InfluxTensorflow():
         # 2. Define the model
         XX = tf.reshape(X, [col_length, batch_size]) # flattening images
 
-        Y = Wx + b
+        #Y = Wx + b
         ######## SIGMOID activation func #######
         Y1 = tf.nn.sigmoid(tf.matmul(XX, W1) + B1)
         ######## ReLU activation func #######
@@ -197,7 +169,7 @@ class InfluxTensorflow():
         epoch_size = 100
         training_data = rdd_join.collect()
 
-        for i in range(training_iter):
+        """for i in range(training_iter):
             test = False
             if i % epoch_size == 0:
                 test = True
@@ -207,7 +179,7 @@ class InfluxTensorflow():
             test_a += ta
             test_c += tc
 
-        print X
+        print X"""
 
         training_data = rdd_join.collect()
 
@@ -215,7 +187,7 @@ class InfluxTensorflow():
                                     shape=[batch_size, self.len_features])
         input_data = tf.Variable(data_initializer, trainable=False, collections=[])
         res = sess.run(input_data.initializer, feed_dict={data_initializer: training_data})
-        print res"""
+        print res
 
     def train_model_test(self, rdd_join):
         """
@@ -230,14 +202,16 @@ class InfluxTensorflow():
         #if n_features != self.n_input_features_:
         #    raise ValueError("X shape does not match training shape")
 
-        x = tf.placeholder(tf.float32, shape=(col_length, batch_size))
-        val = tf.one_hot([0, 3], 4)
-        # y = tf.matmul(tf.reshape(x, [batch_size, col_length]), x)
-        #with tf.Session() as sess:
-        #    print (sess.run(y, feed_dict={x: val}))
+        x = tf.placeholder(tf.float32, shape=(batch_size, col_length))
 
-        # Comments below
-        # Specify that all features have real-value data
+        y = tf.matmul(tf.reshape(x, [batch_size, col_length]), x)
+        data_initializer = tf.placeholder(dtype=tf.float32,
+                                shape=[batch_size, col_length])
+        input_data = tf.Variable(data_initializer, trainable=False, collections=[])
+        with tf.Session() as sess:
+            print (sess.run(input_data.initializer, feed_dict={x: training_data}))
+
+        """# Specify that all features have real-value data
         feature_columns = [tf.contrib.layers.real_valued_column("", dimension=5)]
 
         # Build 3 layer DNN with 10, 20, 10 units respectively.
@@ -245,14 +219,11 @@ class InfluxTensorflow():
                                             hidden_units=[10, 20, 10],
                                             n_classes=3)
         # Fit model.
-        classifier.fit(x=training_data,
-               y=training_data,
-               steps=10)
+        classifier.fit(x=training_data, y=training_data, steps=10)
 
         # Evaluate accuracy.
-        accuracy_score = classifier.evaluate(x=test_set.data,
-                                     y=test_set.target)["accuracy"]
-        print ('Accuracy: {0:f}'.format(accuracy_score))
+        accuracy_score = classifier.evaluate(x=test_set.data, y=test_set.target)["accuracy"]
+        print ('Accuracy: {0:f}'.format(accuracy_score))"""
 
         return []
 
@@ -295,7 +266,7 @@ class InfluxTensorflow():
         return final_state
 
     def load_data_into_tensorflow(self, data):
-        return self.train_model(data)
+        return self.train_model_test(data)
         # return self.train_model_lstm(data)
 
     def join_rdd(self, rdd1_, rdd2_):
@@ -306,9 +277,15 @@ class InfluxTensorflow():
         :param rdd2_: second RDD
         :return: result after joining two RDD
         """
+        """if rdd2_.collect():
+            print 'nonnonononon'
+            rdd_ = rdd1_.leftOuterJoin(rdd2_)
+            print ('join yes no',rdd_.collect())
+        else:
+            print 'yesyesyes' """
         rdd_ = rdd1_.join(rdd2_) #.collectAsMap() # .reduceByKey(lambda x,y : x+y)
         if rdd_:
-            return rdd_.map(lambda x : (x[0],sum(x[1],())))
+            return rdd_.map(lambda x : (x[0],sum(x[1],()))) # adding multiples tuples
         else:
             return rdd1_
 
@@ -321,27 +298,37 @@ class InfluxTensorflow():
         :return: RDD
         """
         if results_g:
-            for count, res_g in enumerate(results_g.raw['series'][0:]):
-                values_g = res_g['values']
-                name_g = res_g['name']
-                columns_g = res_g['columns']
+            for count, res in enumerate(results_g.raw['series'][0:]):
+                values_g = res['values']
+                name_g = res['name']
+                x = res['columns']; print (x); #print ('values',values_g)
 
-                rdd1 = sc.parallelize(values_g)
-                print rdd1.collect()
-
-                if source == 'nm':                 #   | mem heap | mem cpu limit| mem heap | threads |  source
-                    rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[17:18] + x[31:34] + x[38:44] + x[60:66] + x[70:71] )))
-                elif source == 'spark':            #   appid     |  compile | diskspace  |  read write ops |  heap init | jobs n mem | 
-                    rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[5:6] + x[8:9] + x[17:18] + x[27:28] + x[29:30] + x[52:57] + x[58:63])))
-                    #rdd1_ = rdd1_.map(lambda x: (x[0], tuple(x[1:5] + [float(x[5].replace('application_',''))] + x[6:])))
+                rdd1 = sc.parallelize(values_g);
+                rdd1_ = rdd1 # remove after testing
+                if source == 'nm':
+                    # COLUMNS: u'Hostname=vagrant_PCpuUsagePercentAvgPercents', u'Hostname=vagrant_pMemLimitMBs', u'Hostname=vagrant_vCoreLimit', u'Hostname=vagrant_vMemLimitMBs', u'MemHeapCommittedM', u'MemHeapMaxM',
+                    # u'MemHeapUsedM', u'MemMaxM', u'MemNonHeapCommittedM',u'MemNonHeapMaxM', u'ThreadsBlocked', u'ThreadsNew',u'ThreadsRunnable', u'ThreadsTerminated', u'ThreadsTimedWaiting', u'ThreadsWaiting'
+                    src = (res['tags']['source']).replace('ContainerResource_container_e','').replace('_','')
+                    src = float(src)
+                    rdd1_ = rdd1.map(lambda x: x[0:1] + x[17:18] + x[31:34] + x[38:44] + x[70:71] +[src] )
+                    rdd1_ = rdd1_.map(lambda x: [ self.rep_None if a == None else a for a in x])
+                elif source == 'spark':
+                    # COLUMNS: u'appid', u'compilationTime_mean', u'disk_diskSpaceUsed_MB', u'filesystem_hdfs_read_ops', u'filesystem_hdfs_write_ops', u'heap_committed', u'heap_init', u'heap_max', u'heap_usage',
+                    # u'heap_used', u'job_activeJobs', u'job_allJobs', u'memory_maxMem_MB', u'memory_memUsed_MB', u'memory_remainingMem_MB'
+                    rdd1_ = rdd1.map(lambda x: x[0:1] + x[5:6] + x[8:9] + x[17:18] + x[27:28] + x[29:30] + x[52:57] + x[58:63])
+                    rdd1_ = rdd1_.map(lambda x: [ self.rep_None if a == None else a for a in x])
+                    rdd1_ = rdd1_.map(lambda x: x[0:1] + [float(x[1].replace('application_','').replace('_',''))] + x[2:])
                 else:
                     pass
 
-                print rdd1_.collect()
+                rdd1_ = rdd1_.map(lambda x: (x[0], tuple(x[1:]))) # converted to tuple for join operation to work properly
+
+                print ('nm', count, name_g, rdd1_.collect())
                 if count == 0:
                     rdd_join = rdd1_
                 else:
-                    rdd_join = self.join_rdd(rdd_join, rdd1_)
+                    rdd_join = rdd_join.unionAll(rdd1_)
+                    #rdd_join = self.join_rdd(rdd_join, rdd1_)
                     pass
 
                 if re.search(r'yarn.Hostname=(.*?)\.',name_g,re.I|re.S):
@@ -359,17 +346,22 @@ class InfluxTensorflow():
         :param sc: sparkcontext
         :return: RDD
         """
-        for count, res_t in enumerate(results_t.raw['series'][0:]):
+        for count, res_t in enumerate(results_t.raw['series'][0:2]):
+            """ There are no tags for spark job """
             values_t = res_t['values']
-            name_t = res_t['name']; print ('name_t',name_t); print ('values_t', values_t)
-            columns_t = res_t['columns']; print ("colmmns",columns_t)
+            name_t = res_t['name']; # print ('name_t',name_t)
+            x = res_t['columns']; # print ("colmmns", x[2:4] + x[6:7] + x[8:9] + x[19:21])
+            # COLUMNS: 'available', u'available_percent', u'free', u'total', u'used', u'used_percent'
             rdd1 = sc.parallelize(values_t)
+            rdd1 = rdd1.map(lambda x: [ self.rep_None if a == None else a for a in x])
+
             if count == 0: # for host cpu info
-                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[23:25])))
+                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[6:7] + x[8:9] + x[19:21])))
             elif count == 1: # for host mem info
-                #rdd1_ = rdd1.map(lambda x: (x[0], tuple(x[1:])))
-                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[23:25]))) # hardcoded time need to be replaced after
-            print ("rdd1____",rdd1_.collect())
+                rdd1_ = rdd1.map(lambda x: (1493287029000000000, tuple(x[2:4] + x[6:7] + x[8:9] + x[19:21]))) # hardcoded time need to be replaced after
+
+            #rdd1_ = rdd1_.map(lambda x: [ 0 if a == None else a for a in x])
+            print ("tele rdd1_", count, name_t, rdd1_.collect())
             if count == 0:
                 rdd_join = rdd1_
             else:
@@ -380,12 +372,18 @@ class InfluxTensorflow():
         query = "{0} where time > {1} and time < {2} group by /time/ limit 2".format(self.query_g, time1, time2)
         return self.query_batch(query, db="graphite")
 
-    def get_results_from_telegraf(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} group by /time/ limit 2".format(self.query_t, time1, time2)
+    def get_results_from_telegraf_cpu(self, time1, time2):
+        query = "{0} where time > {1} and time < {2} group by /time/ limit 3".format(self.query_t_cpu, time1, time2)
+        #query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ group by /time/ limit 3".format(self.query_t, time1, time2)
+        return self.query_batch(query, db="telegraf")
+
+    def get_results_from_telegraf_mem(self, time1, time2):
+        query = "{0} where time > {1} and time < {2} group by /time/,/mem/ limit 3".format(self.query_t_mem, time1, time2)
+        #query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ group by /time/ limit 3".format(self.query_t, time1, time2)
         return self.query_batch(query, db="telegraf")
 
     def get_results_from_graphite_nm(self, time1, time2):
-        query = "{0} nodemanager where source =~ /container.*$/ and time = {1} group by /time/,/cpu/ limit 2".format(self.query_rns, time1)
+        query = "{0} nodemanager where source =~ /container.*$/ and time = {1} group by /time/,/cpu/,/source/ limit 2".format(self.query_rns, time1)
         #query = "{0} nodemanager where service =~ /jvm.*/ and source =~ /JvmMetrics/ limit 2".format(self.query_rns)
         return self.query_batch(query, db="graphite")
 
@@ -402,12 +400,19 @@ class InfluxTensorflow():
 
         t_nm = 1493038354000000000 # for test
 
-        results_t = self.get_results_from_telegraf(time11, time22); print ("result_telegraf", results_t)
-        values_t = (results_t.raw['series'])[0]['columns']; print values_t
+        results_t = self.get_results_from_telegraf_cpu(time11, time22);
+        results_t_mem = self.get_results_from_telegraf_mem(time11, time22);
+        print ("result_telegraf", results_t); 
+        print ("result_telegraf_mem", results_t_mem); #return
+
+        results_t_mem = self.get_results_from_telegraf_mem(time11, time22);
+        print ("result_telegraf_mem", results_t);
+
         #results_g = self.get_results_from_graphite(time1, time2)
 
         results_g_nm = self.get_results_from_graphite_nm(time1, time2)
-        print "result_g_nm",results_g_nm
+        #print "result_g_nm",results_g_nm
+
         results_g_spark = self.get_results_from_graphite_spark(time1, time2)
         #print "resutls_g_spark",results_g_spark
         if True: # results_t
@@ -415,22 +420,33 @@ class InfluxTensorflow():
             sc = SparkContext()
 
             rdd_join_tele = self.join_telegraf_metrics(results_t, sc)
-            print ("tele",rdd_join_tele.collect()); return
-            #rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm')
-            #print ("nm",rdd_join_g_nm.collect()); return
+            print ("tele",rdd_join_tele.collect());
+            rdd_join_tele_mem = self.join_telegraf_metrics(results_t, sc)
+            print ("tele",rdd_join_tele_mem.collect());
+            rdd_join = self.join_rdd(rdd_join_tele, rdd_join_tele_mem)
+            print ('rdd_join_tele_cpu,mem',rdd_join); return
+
+            rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm')
+            print ("nm",rdd_join_g_nm.collect()); #return
 
             #rdd_join_g_spark = self.join_graphite_metrics(results_g_spark, sc, 'spark')
             #print ("spark",rdd_join_g_spark.collect());
 
-            rdd_join_g_rm = self.join_graphite_metrics(results_g_rm, sc, 'rm')
-            print ("rm",rdd_join_g_rm.collect()); return
+            #rdd_join_g_rm = self.join_graphite_metrics(results_g_rm, sc, 'rm')
+            #print ("rm",rdd_join_g_rm.collect()); return
 
-            rdd_join = self.join_rdd(rdd_join_g_nm, rdd_join_g_spark)
-            #rdd_join = self.join_rdd(rdd_join, rdd_join_tele)
+            """if not rdd_join_g_spark:
+                rdd_spark = [([0] * self.col_len_nm)]*len(rdd_join_g_nm.collect())
+                rdd_spark = sc.parallelize(rdd_spark)
+                rdd_join = rdd_spark.map(lambda x: (x[0], tuple(x[1:]))); print rdd_join
+            else:
+                rdd_join = self.join_rdd(rdd_join_g_nm, rdd_join_g_spark)"""
+            rdd_join = self.join_rdd(rdd_join_g_nm, rdd_join_tele)
 
             #rdd_join = self.join_graphite_metrics(results_t, sc, '')
             #rdd_join = self.join_telegraf_metrics(results_t, rdd_join, sc)
-            rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
+
+            #rdd_join = (rdd_join.map(lambda x : [x[0]] + list(x[1])))
             data = rdd_join.collect()
             print ("joined results", data)
 
