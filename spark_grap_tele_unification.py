@@ -33,10 +33,7 @@ class InfluxTensorflow():
         self.mysql_port = mysql_port
 
         self.rep_None = -1
-        self.col_len_nm = 12
-        self.col_len_rm = 5
         self.col_len_spark = 8
-        self.col_len_host = 5
 
     def query_batch(self, query, db, epoch='ns'):
         """
@@ -58,12 +55,6 @@ class InfluxTensorflow():
 
             offset += limit
             break
-
-    def get_results_from_mysql_cluster(self):
-        cnx = mysql.connector.connect(user=self.mysql_user, password=self.mysql_user, host=self.mysql_host, database=self.mysql_db, port=self.mysql_port);
-        cursor = cnx.cursor()
-        res = cursor.execute(("select * from jobs_history limit 30"))
-        return cursor.fetchall()
 
     def training_step(self, i, update_test_data, update_train_data, X, Y_, Y1, data_train, train_step, sess, col_length,
                       batch_size, labels, cross_entropy):
@@ -98,7 +89,6 @@ class InfluxTensorflow():
 
         if update_train_data:
             c = sess.run(cross_entropy, feed_dict={X: data_train, Y_: labels})
-            print ('c',c)
             train_c.append(c)
 
         """if update_test_data:
@@ -123,22 +113,24 @@ class InfluxTensorflow():
         """
 
         total_data_size = len(data) # total rows of data
-        training_iter = 7
+        batch_size = 5
+        epoch_size = 5
+        training_iter = total_data_size / batch_size
 
-        batch_size = total_data_size / training_iter
+        #batch_size = total_data_size / training_iter
         col_length = len(data[0])
 
         data_train = data
         #data_train = np.array(data, dtype=np.float32)
-        #print (data_train.shape)
+        #print ('data shape',data_train.shape)
         #labels = np.array(labels, dtype=np.float32)
-        #print (labels.shape);
+        #print ('labels shape',labels.shape);
 
         # 1. Define Variables and Placeholders
         X = tf.placeholder(tf.float32, [batch_size, col_length], name='X')
         Y_ = tf.placeholder(tf.float32, [batch_size,], name='Y_') # placeholder for correct answers
 
-        # Weights initialised with small random values between
+        # Weights initialised with small random values
         W1 = tf.Variable(tf.truncated_normal([col_length, 1], stddev=0.1))
         B1 = tf.Variable(tf.zeros([1]))
         #W2 = tf.Variable(tf.truncated_normal([1, batch_size], stddev=0.1))
@@ -158,7 +150,7 @@ class InfluxTensorflow():
 
         # 5. Define an optimizer
         # optimizer = tf.train.GradientDescentOptimizer(0.5)
-        optimizer = tf.train.AdamOptimizer(0.050)  ## do not use gradient descent
+        optimizer = tf.train.AdamOptimizer(0.005)  ## do not use gradient descent
         train_step = optimizer.minimize(cross_entropy)
 
         # initialize and train
@@ -168,11 +160,8 @@ class InfluxTensorflow():
         train_c = []
         test_c = []
 
-        epoch_size = 3
-
         for i in range(training_iter-1):
             test = False
-            print i
             if i % epoch_size == 0:
                 test = True
 
@@ -300,7 +289,7 @@ class InfluxTensorflow():
                 name_g = res['name']
                 x = res['columns'];
                 #print ('Columns',name_g, x)
-                print ('Columns',name_g, x[0:1] + x[97:98] + x[32:39] + x[44:45] + x[51:52] + x[57:59] + x[64:64] + x[68:69] + x[98:99] + x[101:103] + ['app id'] )
+                #print ('Columns',name_g, x[0:1] + x[97:98] + x[32:39] + x[44:45] + x[51:52] + x[57:59] + x[64:64] + x[68:69] + x[98:99] + x[101:103] + ['app id'] )
                 #print ('values',values_g)
 
                 rdd1 = sc.parallelize(values_g)
@@ -308,7 +297,7 @@ class InfluxTensorflow():
                 if source == 'nm':
                     #src = float((res['tags']['source']).replace('ContainerResource_container_e','').replace('_',''))
 
-                    rdd1_ = rdd1.map(lambda x: x[0:1] + x[97:98] + x[32:39] + x[44:45] + x[51:52] + x[57:59] + x[64:64] + x[68:69] + x[98:99] + x[101:103] +\
+                    rdd1_ = rdd1.map(lambda x: x[0:1] + x[97:98] + x[39:40] + x[44:45] + x[51:52] + x[58:59] +\
                     x[100:101] + [ self.get_appid_from_cont(x[100]) ] ) #+[src] )
                     rdd1_ = rdd1_.map(lambda x: [ self.rep_None if a == None else a for a in x])
                 elif source == 'spark':
@@ -332,11 +321,6 @@ class InfluxTensorflow():
         else:
             return []
 
-    def join_mysql_metrics(self, results_mysql, sc):
-        rdd1 = sc.parallelize(results_mysql)
-        rdd1 = rdd1.map(lambda x: (x[3], tuple(x[0:1])) )
-        return rdd1
-
     def join_telegraf_metrics(self, results_t, sc, source):
         """
         Convert telegraf db results into RDD
@@ -350,15 +334,16 @@ class InfluxTensorflow():
             """ There are no tags at host """
             values_t = res_t['values']
             name_t = res_t['name']; # print ('name_t',name_t)
-            x = res_t['columns']; #print ("columns", name_t, x[8:9] + x[2:4] + x[7:8] + x[11:14])
-            # COLUMNS: 'available', u'available_percent', u'free', u'total', u'used', u'used_percent'
+            x = res_t['columns'];# print ("columns", name_t, x)
+            #print (values_t)
+
             rdd1 = sc.parallelize(values_t)
             rdd1 = rdd1.map(lambda x: [ self.rep_None if a == None else a for a in x])
 
             if source == 'cpu': # for host cpu info
-                rdd1_ = rdd1.map(lambda x: ((x[0], x[3]), tuple(x[5:6] + x[8:9] + x[13:15]))) # x[3]hostname
+                rdd1_ = rdd1.map(lambda x: ((x[0], x[3]), tuple(x[8:9] + x[13:15]))) # x[3]hostname
             elif source == 'mem': # for host mem info
-                rdd1_ = rdd1.map(lambda x: ((x[0], x[8]), tuple(x[2:4] + x[7:8] + x[11:14]))) # hardcoded time need to be replaced after
+                rdd1_ = rdd1.map(lambda x: ((x[0], x[8]), tuple(x[2:3] + x[7:8] + x[12:13]))) # hardcoded time need to be replaced after
 
             rdd1_ = rdd1_.map(lambda x: [ 0 if a == None else a for a in x])
             #print ("tele rdd1_", count, name_t, rdd1_.collect())
@@ -368,23 +353,34 @@ class InfluxTensorflow():
                 rdd_join = self.join_rdd(rdd_join, rdd1_)
         return rdd_join
 
+    def join_mysql_metrics(self, results_mysql, sc):
+        rdd1 = sc.parallelize(results_mysql)
+        rdd1 = rdd1.map(lambda x: (x[3], tuple(x[0:1])) )
+        return rdd1
+
+    def get_results_from_mysql_cluster(self):
+        cnx = mysql.connector.connect(user=self.mysql_user, password=self.mysql_user, host=self.mysql_host, database=self.mysql_db, port=self.mysql_port);
+        cursor = cnx.cursor()
+        res = cursor.execute(("select * from jobs_history"))
+        return cursor.fetchall()
+
     def get_results_from_graphite(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} group by /time/ limit 2".format(self.query_g, time1, time2)
+        query = "{0} where time > {1} and time < {2} group by /time/".format(self.query_g, time1, time2)
         return self.query_batch(query, db="graphite")
 
     def get_results_from_telegraf_cpu(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ order by time desc".format(self.query_t_cpu, time1, time2)
-        #query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ group by /time/ limit 3".format(self.query_t, time1, time2)
+        #query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ order by time desc".format(self.query_t_cpu, time1, time2)
+        query = "{0} where cpu =~ /cpu-total/ order by time desc".format(self.query_t_cpu)
         return self.query_batch(query, db="telegraf")
 
     def get_results_from_telegraf_mem(self, time1, time2):
-        query = "{0} where time > {1} and time < {2} order by time desc".format(self.query_t_mem, time1, time2)
-        #query = "{0} where time > {1} and time < {2} and cpu =~ /cpu-total/ group by /time/ limit 3".format(self.query_t, time1, time2)
+        #query = "{0} where time > {1} and time < {2} order by time desc".format(self.query_t_mem, time1, time2)
+        query = "{0} order by time desc".format(self.query_t_mem)
         return self.query_batch(query, db="telegraf")
 
     def get_results_from_graphite_nm(self, time1, time2):
-        query = "{0} nodemanager where source =~ /container.*$/ and time > {1} and time < {2} order by time desc limit 100000".format(self.query_rns, time1, time2) # group by /time/,/cpu/,/source/
-        #query = "{0} nodemanager where service =~ /jvm.*/ and source =~ /JvmMetrics/ limit 2".format(self.query_rns)
+        #query = "{0} nodemanager where source =~ /container.*$/ and time > {1} and time < {2} order by time desc limit 100000".format(self.query_rns, time1, time2) # group by /time/,/cpu/,/source/
+        query = "{0} nodemanager where source =~ /container.*$/ order by time desc".format(self.query_rns)
         return self.query_batch(query, db="graphite")
 
     def get_results_from_graphite_spark(self, time1, time2):
@@ -418,14 +414,14 @@ class InfluxTensorflow():
             sc = SparkContext()
 
             rdd_join_tele_cpu = self.join_telegraf_metrics(results_t_cpu, sc, 'cpu')
-            #print ("tele_cpu",rdd_join_tele_cpu.collect());
+            #print ("tele_cpu",rdd_join_tele_cpu.collect()); return
             rdd_join_tele_mem = self.join_telegraf_metrics(results_t_mem, sc, 'mem')
-            #print ("tele_mem",rdd_join_tele_mem.collect());
+            #print ("tele_mem",rdd_join_tele_mem.collect()); return
             rdd_join_t = self.join_rdd(rdd_join_tele_cpu, rdd_join_tele_mem);
             #print ('rdd_join_tele_cpu_mem',rdd_join_t.collect())
 
-            rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm')
-            #print ("nm",rdd_join_g_nm.collect());
+            rdd_join_g_nm = self.join_graphite_metrics(results_g_nm, sc, 'nm');
+            #print ("nm",rdd_join_g_nm.collect());return
 
             #rdd_join_g_spark = self.join_graphite_metrics(results_g_spark, sc, 'spark')
             #print ("spark",rdd_join_g_spark.collect());
@@ -448,6 +444,7 @@ class InfluxTensorflow():
 
             rdd_mysql = self.join_mysql_metrics(results_mysql, sc)
             #print ('rdd_mysql',rdd_mysql.collect()); print '\n'
+
             rdd_join = rdd_join_g_nm_t.map(lambda x: (x[1][-1], tuple(x[0:])))
             #print ('rdd_join', rdd_join.collect());
 
@@ -455,21 +452,25 @@ class InfluxTensorflow():
             #print ('rdd t g nm mysql', rdd_join.collect())
 
             rdd_join = rdd_join.map(lambda x : [x[1][0][0]] + list(x[1][1]) + [x[1][2]]) # x[0][0] time hostname
-            labels_rdd = rdd_join.map(lambda x: int(x[18]) ) # x[11] cpu, x[14] mem
-            #rdd_join = rdd_join.map(lambda x : x[0:10] +x[11:-3] + [self.remv_cont_s(x[-3])] + [self.remv_app_s(x[-2])] + [x[-1]] )
-            rdd_join = rdd_join.map(lambda x : x[0:25] )
+            labels_rdd = rdd_join.map(lambda x: int(x[8]) )
+            rdd_join = rdd_join.map(lambda x : x[0:8] + x[9:-3] + [self.remv_cont_s(x[-3])] + [self.remv_app_s(x[-2])] + [x[-1]] )
+            #rdd_join = rdd_join.map(lambda x : x[0:25] )
 
             labels = labels_rdd.collect()
             data = rdd_join.collect()
             print len(data)
-            #print ("joined results", data)
+            print ("joined results", data[0])
             #print ("labels",labels)
+
+            opf = csv.writer(open('data1.csv', 'w'), delimiter=',')
+            for row in data:
+                opf.writerow(row)
 
             #print rdd_join.coalesce(1).glom().collect()   # .glom()  # coalesce to reduce  no of partitions
             result = self.load_data_into_tensorflow(data, labels)
 
     def get_data_from_csv(self):
-        with open('data.csv', 'rb') as f:
+        with open('data1.csv', 'rb') as f:
             try:
                 file_reader = csv.reader(f, delimiter=',')
             except IOError:
@@ -477,15 +478,18 @@ class InfluxTensorflow():
                 sys.exit()
             data = list(file_reader)
 
-        #print data[0]
+        print len(data)
 
-        labels = [ d[17] for d in data ]
+        labels = [ d[8] for d in data ]
+        data = [ x[0:8] + x[9:-3] + [self.remv_cont_s(x[-3])] + [self.remv_app_s(x[-2])] + [x[-1]] for x in data ]
+        #print data
+        #print labels
         result = self.load_data_into_tensorflow(data, labels)
 
     def main(self):
 
-        self.get_data_from_influxdb()
-        #self.get_data_from_csv()
+        #self.get_data_from_influxdb()
+        self.get_data_from_csv()
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -513,4 +517,3 @@ if __name__ == '__main__':
     mysql_port = info[5]
     indbtf = InfluxTensorflow(args.host, args.port, username, password, 'graphite', mysql_host, mysql_user, mysql_db, mysql_port)
     indbtf.main()
-
